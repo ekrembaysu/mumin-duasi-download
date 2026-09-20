@@ -1,7 +1,6 @@
-﻿window.MUMIN_INSTALLER_CONFIG = {
-  apkUrl: './mumin-duasi-test.apk',
+window.MUMIN_INSTALLER_CONFIG = {
+  apkUrl: 'https://github.com/ekrembaysu/mumin-duasi-download/releases/download/v0.20.1/mumin-duasi-v0201.apk',
   downloadName: 'Mumin-Duasi.apk',
-  sha256: '3ee7aa09c3118dfc39cec7c60d55d45ccabf21a616bd13e6048f596f29eac30f',
-  testBuild: true
+  sha256: '6db89f4b30f6c5d4aabf89a29470b77ac9d4034ca02e267b537d18f593d1e53a',
+  testBuild: false
 };
-
