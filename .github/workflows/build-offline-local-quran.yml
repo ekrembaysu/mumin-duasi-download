@@ -1,6 +1,12 @@
 name: Build v0.20.7 from MOORE D Quran Audio
 
 on:
+  push:
+    branches:
+      - source-v0206
+    paths:
+      - "source-bundles/**"
+      - ".github/workflows/build-offline-local-quran.yml"
   workflow_dispatch:
     inputs:
       base_url:
