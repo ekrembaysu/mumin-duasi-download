@@ -1,0 +1,115 @@
+name: Build Quran Audio Masters
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "audio/kani-karaca-source-urls.txt"
+      - ".github/workflows/build-quran-audio.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  build-audio:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install audio tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg zip
+
+      - name: Build 116 mobile and YouTube masters
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/original build/master
+
+          base_filter="highpass=f=140,equalizer=f=2500:t=q:w=1.0:g=-2.5,equalizer=f=3600:t=q:w=1.0:g=-4.0,equalizer=f=5200:t=q:w=1.2:g=-2.0,acompressor=threshold=-18dB:ratio=2:attack=20:release=180:makeup=1,loudnorm=I=-24:LRA=8:TP=-7"
+          intro_filter="volume='if(lt(t,2),0.68,if(lt(t,8),0.68+(t-2)*0.053333,1))':eval=frame"
+
+          total=$(grep -c '^https://' audio/kani-karaca-source-urls.txt)
+          test "$total" -eq 116
+
+          i=0
+          while IFS= read -r url; do
+            [ -n "$url" ] || continue
+            i=$((i+1))
+            name="${url##*/}"
+            echo "[$i/$total] $name"
+
+            curl --fail --location --retry 4 --retry-delay 2 \
+              -A "Mozilla/5.0" -e "https://semazen.net/" \
+              "$url" -o "build/original/$name"
+
+            if [[ "$name" == "002_Bakara_Suresi_2_Kani_Karaca.mp3" || "$name" == "017_Isra_Suresi2_Kani_Karaca.mp3" ]]; then
+              filter="$base_filter"
+            else
+              filter="$base_filter,$intro_filter"
+            fi
+
+            ffmpeg -y -hide_banner -loglevel error \
+              -i "build/original/$name" \
+              -af "$filter" \
+              -c:a libmp3lame -ar 44100 -b:a 160k \
+              "build/master/$name"
+
+            ffmpeg -v error -i "build/master/$name" -f null -
+          done < audio/kani-karaca-source-urls.txt
+
+          count=$(find build/master -maxdepth 1 -type f -name '*.mp3' | wc -l)
+          test "$count" -eq 116
+
+      - name: Build delivery package and checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd build/master
+          sha256sum *.mp3 > SHA256SUMS.txt
+          printf '%s\n' \
+            "Mümin Duası - Kani Karaca Mobile / YouTube Master" \
+            "116 MP3 dosyası." \
+            "Profil: HPF 140 Hz; EQ 2.5 kHz -2.5 dB; 3.6 kHz -4 dB; 5.2 kHz -2 dB; compressor 2:1; loudness target -24 LUFS / TP -7." \
+            "Sûre başlangıçları: ilk 2 sn 0.68 gain; 2-8 sn yumuşak geçiş. Bakara-2 ve İsra-2 devam parçalarında giriş geçişi uygulanmaz." \
+            > README.txt
+          zip -9 ../MUMIN_DUASI_KANI_KARACA_YOUTUBE_MASTER.zip *.mp3 SHA256SUMS.txt README.txt
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MUMIN_DUASI_KANI_KARACA_YOUTUBE_MASTER
+          path: |
+            build/MUMIN_DUASI_KANI_KARACA_YOUTUBE_MASTER.zip
+            build/master/SHA256SUMS.txt
+          retention-days: 30
+
+      - name: Publish stable audio release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="quran-audio-v1"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" \
+              --title "Mümin Duası - Kani Karaca Audio Master v1" \
+              --notes "Telefon hoparlörü için onaylanan mastering profili. 116 MP3 + YouTube ZIP paketi."
+          fi
+
+          gh release upload "$tag" build/master/*.mp3 --clobber
+          gh release upload "$tag" \
+            build/MUMIN_DUASI_KANI_KARACA_YOUTUBE_MASTER.zip \
+            build/master/SHA256SUMS.txt \
+            build/master/README.txt \
+            --clobber
+
+      - name: Final inventory
+        shell: bash
+        run: |
+          echo "MASTER_COUNT=$(find build/master -maxdepth 1 -type f -name '*.mp3' | wc -l)"
+          du -sh build/master
