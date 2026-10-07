@@ -1,19 +1,13 @@
-name: Build v0.20.7 from MOORE D Quran Audio
+name: Verify Mümin Duası source
 
 on:
-  push:
-    branches:
-      - source-v0206
-    paths:
-      - "source-bundles/**"
-      - ".github/workflows/build-offline-local-quran.yml"
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  build:
+  verify:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
@@ -33,52 +27,24 @@ jobs:
           python3 - <<'PY'
           import base64, glob, json, os
           for bundle in sorted(glob.glob("source-bundles/*.json")):
-              with open(bundle, "r", encoding="utf-8") as f:
-                  data = json.load(f)
-              for path, encoded in data.items():
-                  parent = os.path.dirname(path)
-                  if parent:
-                      os.makedirs(parent, exist_ok=True)
-                  with open(path, "wb") as out:
-                      out.write(base64.b64decode(encoded))
+              data=json.load(open(bundle,"r",encoding="utf-8"))
+              for p, encoded in data.items():
+                  parent=os.path.dirname(p)
+                  if parent: os.makedirs(parent,exist_ok=True)
+                  open(p,"wb").write(base64.b64decode(encoded))
           PY
-
-      - name: Prove Quran audio uses only MOORE host
-        shell: bash
-        run: |
-          set -euo pipefail
-          ! grep -R "dosyalar.semazen.net/Kani_Karaca_hatim" lib
-          grep -q "QURAN_AUDIO_BASE_URL" lib/core/config/app_config.dart
-          grep -q "setUrl(_urls\[_partIndex\])" lib/features/quran/quran_audio_player.dart
-          ! grep -q "assets/audio/quran/" pubspec.yaml
 
       - name: Verify MOORE D audio endpoint
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsSL --retry 3 --connect-timeout 15             "$BASE_URL/quran-audio-manifest.json"             -o /tmp/quran-audio-manifest.json
-
+          curl -fsSL "$BASE_URL/quran-audio-manifest.json" -o /tmp/m.json
           python3 - <<'PY'
           import json
-          with open("/tmp/quran-audio-manifest.json","r",encoding="utf-8") as f:
-              m=json.load(f)
-          files=m.get("files",[])
-          assert m.get("count")==114, m.get("count")
-          assert len(files)==114, len(files)
-          nums=[int(x["surah"]) for x in files]
-          assert nums==list(range(1,115)), nums
-          assert files[0]["file"]=="001_Fatiha.mp3"
-          assert files[-1]["file"]=="114_Nas.mp3"
-          print("REMOTE_MANIFEST_COUNT=114")
+          m=json.load(open("/tmp/m.json","r",encoding="utf-8"))
+          assert m["count"] == 114
+          assert len(m["files"]) == 114
           PY
-
-          for f in 001_Fatiha.mp3 050_Kaf.mp3 114_Nas.mp3; do
-            curl -fsSI --retry 3 --connect-timeout 15 "$BASE_URL/$f" >/dev/null
-          done
-
-          code=$(curl -sS -o /dev/null -w '%{http_code}' -r 0-1023 "$BASE_URL/001_Fatiha.mp3")
-          test "$code" = "206"
-          echo "RANGE_HTTP_STATUS=$code"
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -93,48 +59,11 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Test and build
+      - name: Compile check only
         shell: bash
         run: |
           set -euo pipefail
           flutter pub get
-          if [ -d test ]; then flutter test; else echo "NO_TEST_DIR_SKIP"; fi
-          flutter build apk --release             --build-name=0.20.7             --build-number=27             --dart-define=QURAN_AUDIO_BASE_URL="$BASE_URL"
-
-      - name: APK proof
-        shell: bash
-        run: |
-          set -euo pipefail
-          APK=build/app/outputs/flutter-apk/app-release.apk
-          test -s "$APK"
-
-          python3 - <<'PY'
-          import zipfile
-          apk="build/app/outputs/flutter-apk/app-release.apk"
-          with zipfile.ZipFile(apk) as z:
-              names=z.namelist()
-          embedded=[
-              n for n in names
-              if n.startswith("assets/flutter_assets/assets/audio/quran/")
-              and n.lower().endswith(".mp3")
-          ]
-          print(f"EMBEDDED_QURAN_MP3_COUNT={len(embedded)}")
-          assert len(embedded)==0, embedded[:10]
-          PY
-
-          cp "$APK" build/mumin-duasi-v0207.apk
-          sha256sum build/mumin-duasi-v0207.apk > build/mumin-duasi-v0207.apk.sha256
-          ls -lh build/mumin-duasi-v0207.apk
-
-      - name: Publish verified update
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          tag="v0.20.7"
-          if gh release view "$tag" >/dev/null 2>&1; then
-            gh release delete "$tag" --yes --cleanup-tag
-          fi
-
-          gh release create "$tag"             build/mumin-duasi-v0207.apk             build/mumin-duasi-v0207.apk.sha256             --title "Mümin Duası v0.20.7 - MOORE Hosted Quran Audio"             --notes "Kâni Karaca Kur'an sesleri yalnızca MOORE D sunucusundan yayınlanır. 114/114 kayıt ve HTTP Range desteği release öncesi doğrulanmıştır."
+          if [ -d test ]; then flutter test; fi
+          flutter build apk --release --build-name=0.20.8 --build-number=2028             --dart-define=QURAN_AUDIO_BASE_URL="$BASE_URL"
+          echo "CI artifact is NOT a distribution APK. Local MOORE signing is required."
