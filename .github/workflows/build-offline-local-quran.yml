@@ -6,14 +6,8 @@ on:
       - source-v0206
     paths:
       - "source-bundles/**"
-      - "assets/**"
       - ".github/workflows/build-offline-local-quran.yml"
   workflow_dispatch:
-    inputs:
-      base_url:
-        description: "MOORE D public Quran audio base URL"
-        required: true
-        default: "https://mooreunivers.com.tr/media/mumin-duasi/kani-karaca"
 
 permissions:
   contents: write
@@ -22,6 +16,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    env:
+      BASE_URL: https://mooreunivers.com.tr/media/mumin-duasi/kani-karaca
 
     steps:
       - name: Checkout protected source
@@ -57,31 +53,32 @@ jobs:
           ! grep -q "assets/audio/quran/" pubspec.yaml
 
       - name: Verify MOORE D audio endpoint
-        env:
-          BASE_URL: https://mooreunivers.com.tr/media/mumin-duasi/kani-karaca
         shell: bash
         run: |
           set -euo pipefail
-          BASE_URL="${BASE_URL%/}"
           curl -fsSL --retry 3 --connect-timeout 15             "$BASE_URL/quran-audio-manifest.json"             -o /tmp/quran-audio-manifest.json
 
           python3 - <<'PY'
           import json
-          m=json.load(open("/tmp/quran-audio-manifest.json","r",encoding="utf-8"))
+          with open("/tmp/quran-audio-manifest.json","r",encoding="utf-8") as f:
+              m=json.load(f)
           files=m.get("files",[])
           assert m.get("count")==114, m.get("count")
           assert len(files)==114, len(files)
           nums=[int(x["surah"]) for x in files]
-          assert nums==list(range(1,115)), nums[:5]
-          names=[x["file"] for x in files]
-          assert names[0]=="001_Fatiha.mp3"
-          assert names[-1]=="114_Nas.mp3"
+          assert nums==list(range(1,115)), nums
+          assert files[0]["file"]=="001_Fatiha.mp3"
+          assert files[-1]["file"]=="114_Nas.mp3"
           print("REMOTE_MANIFEST_COUNT=114")
           PY
 
           for f in 001_Fatiha.mp3 050_Kaf.mp3 114_Nas.mp3; do
             curl -fsSI --retry 3 --connect-timeout 15 "$BASE_URL/$f" >/dev/null
           done
+
+          code=$(curl -sS -o /dev/null -w '%{http_code}' -r 0-1023 "$BASE_URL/001_Fatiha.mp3")
+          test "$code" = "206"
+          echo "RANGE_HTTP_STATUS=$code"
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -97,48 +94,33 @@ jobs:
           cache: true
 
       - name: Test and build
-        env:
-          BASE_URL: https://mooreunivers.com.tr/media/mumin-duasi/kani-karaca
         shell: bash
         run: |
           set -euo pipefail
           flutter pub get
           if [ -d test ]; then flutter test; else echo "NO_TEST_DIR_SKIP"; fi
-          flutter build apk --release             --build-name=0.20.7             --build-number=27             --dart-define=QURAN_AUDIO_BASE_URL="${BASE_URL%/}"
+          flutter build apk --release             --build-name=0.20.7             --build-number=27             --dart-define=QURAN_AUDIO_BASE_URL="$BASE_URL"
 
       - name: APK proof
-        env:
-          BASE_URL: https://mooreunivers.com.tr/media/mumin-duasi/kani-karaca
         shell: bash
         run: |
           set -euo pipefail
           APK=build/app/outputs/flutter-apk/app-release.apk
           test -s "$APK"
-          unzip -l "$APK" > build/apk-inventory.txt
 
-          embedded=$((grep -E 'assets/flutter_assets/assets/audio/quran/.*\.mp3
-          echo "EMBEDDED_QURAN_MP3_COUNT=$embedded"
-          test "$embedded" -eq 0
-
-          cp "$APK" build/mumin-duasi-v0207.apk
-          sha256sum build/mumin-duasi-v0207.apk > build/mumin-duasi-v0207.apk.sha256
-          ls -lh build/mumin-duasi-v0207.apk
-
-      - name: Publish verified update
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          tag="v0.20.7"
-          if gh release view "$tag" >/dev/null 2>&1; then
-            gh release delete "$tag" --yes --cleanup-tag
-          fi
-
-          gh release create "$tag"             build/mumin-duasi-v0207.apk             build/mumin-duasi-v0207.apk.sha256             --title "Mümin Duası v0.20.7 - MOORE Hosted Quran Audio"             --notes "Kâni Karaca Kur'an sesleri yalnızca MOORE'un D sunucusundan yayınlanır. Üçüncü taraf Kur'an ses kaynağı yoktur. Release öncesi 114 kayıtlı D manifesti ve uzak uç noktalar doğrulanmıştır."
- build/apk-inventory.txt || true) | wc -l)
-          echo "EMBEDDED_QURAN_MP3_COUNT=$embedded"
-          test "$embedded" -eq 0
+          python3 - <<'PY'
+          import zipfile
+          apk="build/app/outputs/flutter-apk/app-release.apk"
+          with zipfile.ZipFile(apk) as z:
+              names=z.namelist()
+          embedded=[
+              n for n in names
+              if n.startswith("assets/flutter_assets/assets/audio/quran/")
+              and n.lower().endswith(".mp3")
+          ]
+          print(f"EMBEDDED_QURAN_MP3_COUNT={len(embedded)}")
+          assert len(embedded)==0, embedded[:10]
+          PY
 
           cp "$APK" build/mumin-duasi-v0207.apk
           sha256sum build/mumin-duasi-v0207.apk > build/mumin-duasi-v0207.apk.sha256
@@ -155,4 +137,4 @@ jobs:
             gh release delete "$tag" --yes --cleanup-tag
           fi
 
-          gh release create "$tag"             build/mumin-duasi-v0207.apk             build/mumin-duasi-v0207.apk.sha256             --title "Mümin Duası v0.20.7 - MOORE Hosted Quran Audio"             --notes "Kâni Karaca Kur'an sesleri yalnızca MOORE'un D sunucusundan yayınlanır. Üçüncü taraf Kur'an ses kaynağı yoktur. Release öncesi 114 kayıtlı D manifesti ve uzak uç noktalar doğrulanmıştır."
+          gh release create "$tag"             build/mumin-duasi-v0207.apk             build/mumin-duasi-v0207.apk.sha256             --title "Mümin Duası v0.20.7 - MOORE Hosted Quran Audio"             --notes "Kâni Karaca Kur'an sesleri yalnızca MOORE D sunucusundan yayınlanır. 114/114 kayıt ve HTTP Range desteği release öncesi doğrulanmıştır."
