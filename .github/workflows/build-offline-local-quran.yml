@@ -134,8 +134,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          tag="v0.20.7-local-audio"
+          tag="v0.20.7"
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release delete "$tag" --yes --cleanup-tag
           fi
-          gh release create "$tag"             build/mumin-duasi-v0207-offline.apk             build/mumin-duasi-v0207-offline.apk.sha256             --title "Mümin Duası v0.20.7 - 114 Offline Kâni Karaca MP3"             --notes "Yerel kaynak MP3'lerden üretildi. Harici Kur'an ses URL'si yok. APK içinde 114/114 MP3 build sırasında doğrulandı."
+          gh release create "$tag"             build/mumin-duasi-v0207-offline.apk             build/mumin-duasi-v0207-offline.apk.sha256             --title "Mümin Duası v0.20.7 - Offline Kâni Karaca MP3"             --notes "Yerel kaynak MP3'lerden üretildi. Harici Kur'an ses URL'si yok. APK içinde 114/114 MP3 build sırasında doğrulandı."
