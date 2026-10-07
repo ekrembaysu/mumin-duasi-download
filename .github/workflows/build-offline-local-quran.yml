@@ -1,0 +1,141 @@
+name: Build v0.20.7 from Local Quran MP3
+
+on:
+  push:
+    branches:
+      - source-v0206
+    paths:
+      - "offline-input/**"
+      - "source-bundles/**"
+      - ".github/workflows/build-offline-local-quran.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - name: Checkout with LFS
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+          fetch-depth: 1
+
+      - name: Validate 114 local MP3 files
+        shell: bash
+        run: |
+          set -euo pipefail
+          git lfs pull
+          python3 - <<'PY'
+          from pathlib import Path
+          import re, sys
+          files=sorted(Path("offline-input").glob("*.mp3"))
+          if len(files)!=114:
+              raise SystemExit(f"LOCAL_MP3_COUNT={len(files)} expected=114")
+          seen={}
+          for p in files:
+              m=re.match(r"^(\d{3})",p.name)
+              if not m:
+                  raise SystemExit(f"Missing 3-digit surah prefix: {p.name}")
+              n=int(m.group(1))
+              if not 1<=n<=114:
+                  raise SystemExit(f"Bad surah prefix {n}: {p.name}")
+              if n in seen:
+                  raise SystemExit(f"Duplicate surah prefix {n}: {seen[n].name}, {p.name}")
+              seen[n]=p
+          missing=[n for n in range(1,115) if n not in seen]
+          if missing:
+              raise SystemExit(f"Missing surahs: {missing}")
+          print("LOCAL_MP3_COUNT=114")
+          PY
+
+      - name: Reconstruct protected Flutter source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64, glob, json, os
+          for bundle in sorted(glob.glob("source-bundles/*.json")):
+              data=json.load(open(bundle,"r",encoding="utf-8"))
+              for path,encoded in data.items():
+                  parent=os.path.dirname(path)
+                  if parent: os.makedirs(parent,exist_ok=True)
+                  with open(path,"wb") as f:
+                      f.write(base64.b64decode(encoded))
+          PY
+
+      - name: Stage local Quran assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p assets/audio/quran
+          python3 - <<'PY'
+          from pathlib import Path
+          import re, shutil
+          for p in sorted(Path("offline-input").glob("*.mp3")):
+              n=int(re.match(r"^(\d{3})",p.name).group(1))
+              target=Path("assets/audio/quran")/f"{n:03d}.mp3"
+              shutil.copy2(p,target)
+          print("STAGED_MP3_COUNT=",len(list(Path("assets/audio/quran").glob("*.mp3"))))
+          PY
+          test "$(find assets/audio/quran -maxdepth 1 -type f -name '*.mp3' | wc -l)" -eq 114
+
+      - name: Prove no remote Quran audio URLs remain
+        shell: bash
+        run: |
+          set -euo pipefail
+          ! grep -R "dosyalar.semazen.net/Kani_Karaca_hatim" lib pubspec.yaml
+          grep -q "setAsset(_urls\[_partIndex\])" lib/features/quran/quran_audio_player.dart
+          ! grep -q "setUrl(_urls\[_partIndex\])" lib/features/quran/quran_audio_player.dart
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.47.4"
+          channel: stable
+          cache: true
+
+      - name: Test and build
+        shell: bash
+        run: |
+          set -euo pipefail
+          flutter pub get
+          flutter test
+          flutter build apk --release --build-name=0.20.7 --build-number=27
+
+      - name: Prove 114 MP3 physically exist inside APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=build/app/outputs/flutter-apk/app-release.apk
+          test -s "$APK"
+          unzip -l "$APK" > build/apk-inventory.txt
+          count=$(grep -E 'assets/flutter_assets/assets/audio/quran/[0-9]{3}\.mp3$' build/apk-inventory.txt | wc -l)
+          echo "APK_QURAN_MP3_COUNT=$count"
+          test "$count" -eq 114
+          for n in $(seq -w 1 114); do
+            grep -q "assets/flutter_assets/assets/audio/quran/$(printf '%03d' "$((10#$n))").mp3" build/apk-inventory.txt
+          done
+          cp "$APK" build/mumin-duasi-v0207-offline.apk
+          sha256sum build/mumin-duasi-v0207-offline.apk > build/mumin-duasi-v0207-offline.apk.sha256
+          ls -lh build/mumin-duasi-v0207-offline.apk
+
+      - name: Publish emergency release only after proof
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="v0.20.7-local-audio"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release delete "$tag" --yes --cleanup-tag
+          fi
+          gh release create "$tag"             build/mumin-duasi-v0207-offline.apk             build/mumin-duasi-v0207-offline.apk.sha256             --title "Mümin Duası v0.20.7 - 114 Offline Kâni Karaca MP3"             --notes "Yerel kaynak MP3'lerden üretildi. Harici Kur'an ses URL'si yok. APK içinde 114/114 MP3 build sırasında doğrulandı."
