@@ -33,7 +33,7 @@ jobs:
           base_filter="highpass=f=140,equalizer=f=2500:t=q:w=1.0:g=-2.5,equalizer=f=3600:t=q:w=1.0:g=-4.0,equalizer=f=5200:t=q:w=1.2:g=-2.0,acompressor=threshold=-18dB:ratio=2:attack=20:release=180:makeup=1,loudnorm=I=-24:LRA=8:TP=-7"
           intro_filter="volume='if(lt(t,2),0.68,if(lt(t,8),0.68+(t-2)*0.053333,1))':eval=frame"
 
-          total=$(grep -c '^https://' audio/kani-karaca-source-urls.txt)
+          total=$(grep -Ec '^https?://' audio/kani-karaca-source-urls.txt)
           test "$total" -eq 116
 
           i=0
