@@ -6,6 +6,7 @@ on:
       - source-v0206
     paths:
       - "source-bundles/**"
+      - "assets/**"
       - ".github/workflows/build-offline-local-quran.yml"
   workflow_dispatch:
     inputs:
