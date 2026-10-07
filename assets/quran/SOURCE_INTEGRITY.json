@@ -1,0 +1,28 @@
+{
+  "arabic": {
+    "file": "quran-uthmani.txt",
+    "sha256": "4b91f9e6e8ac645d039e4ed85b3be492e795232a31cd22d668ac58238722e26f",
+    "bytes": 1384612,
+    "source": "Tanzil Project Uthmani v1.1"
+  },
+  "reading": {
+    "file": "quran-turkish-reading.txt",
+    "sha256": "56a14e1ccefc0c0bb207a4330c12eb3fc322a556b5a71ae8c8691be8743a3884",
+    "bytes": 696693,
+    "source": "Locally generated from bundled Uthmani text; Turkish qiraat helper"
+  },
+  "meal": {
+    "file": "elmali-original-groups.json",
+    "sha256": "e77160e9342e066bd0edb8bd9edf36072eb0112c21028eadf8f0e1fa1ab8c1a6",
+    "bytes": 1043230,
+    "source": "Wikikaynak / Muhammed Hamdi Yazır original meal; grouped verse coverage"
+  },
+  "validation": {
+    "arabic_ayahs": 6236,
+    "reading_rows": 6236,
+    "reading_golden_pass": "30/30",
+    "meal_ayah_coverage": 6236,
+    "meal_groups": 6207,
+    "meal_residual_markup": 0
+  }
+}
