@@ -43,9 +43,10 @@ jobs:
             name="${url##*/}"
             echo "[$i/$total] $name"
 
-            curl --fail --location --retry 4 --retry-delay 2 \
-              -A "Mozilla/5.0" -e "https://semazen.net/" \
-              "$url" -o "build/original/$name"
+            wget --quiet --tries=4 --timeout=90 \
+              --user-agent="Mozilla/5.0" \
+              --referer="https://semazen.net/" \
+              -O "build/original/$name" "$url"
 
             if [[ "$name" == "002_Bakara_Suresi_2_Kani_Karaca.mp3" || "$name" == "017_Isra_Suresi2_Kani_Karaca.mp3" ]]; then
               filter="$base_filter"
