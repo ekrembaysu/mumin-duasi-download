@@ -102,7 +102,7 @@ jobs:
         run: |
           set -euo pipefail
           flutter pub get
-          flutter test
+          if [ -d test ]; then flutter test; else echo "NO_TEST_DIR_SKIP"; fi
           flutter build apk --release             --build-name=0.20.7             --build-number=27             --dart-define=QURAN_AUDIO_BASE_URL="${BASE_URL%/}"
 
       - name: APK proof
