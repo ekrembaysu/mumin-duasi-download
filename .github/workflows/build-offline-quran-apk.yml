@@ -1,0 +1,244 @@
+name: Build Mümin Duası Offline Quran APK
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/build-offline-quran-apk.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-offline-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+
+    steps:
+      - name: Checkout protected source
+        uses: actions/checkout@v4
+        with:
+          ref: source-v0206
+          fetch-depth: 1
+
+      - name: Reconstruct Flutter source from protected bundles
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64, glob, json, os
+          count = 0
+          for bundle in sorted(glob.glob("source-bundles/*.json")):
+              with open(bundle, "r", encoding="utf-8") as f:
+                  data = json.load(f)
+              for path, encoded in data.items():
+                  parent = os.path.dirname(path)
+                  if parent:
+                      os.makedirs(parent, exist_ok=True)
+                  with open(path, "wb") as out:
+                      out.write(base64.b64decode(encoded))
+                  count += 1
+          print(f"RECONSTRUCTED_FILES={count}")
+          if not os.path.exists("pubspec.yaml"):
+              raise SystemExit("pubspec.yaml missing after reconstruction")
+          if not os.path.exists("lib/features/quran/quran_audio_player.dart"):
+              raise SystemExit("quran audio player missing after reconstruction")
+          PY
+
+      - name: Set emergency update version
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          p = Path("pubspec.yaml")
+          s = p.read_text(encoding="utf-8")
+          s, n = re.subn(r"(?m)^version:\s*[^\r\n]+$", "version: 0.20.7+27", s, count=1)
+          if n != 1:
+              raise SystemExit("version field not found")
+          asset_line = "    - assets/audio/quran/"
+          if asset_line not in s:
+              marker = "  assets:\n"
+              if marker not in s:
+                  raise SystemExit("flutter assets block not found")
+              s = s.replace(marker, marker + asset_line + "\n", 1)
+          p.write_text(s, encoding="utf-8")
+          PY
+
+      - name: Install audio and Android build tools
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg wget unzip
+
+      - name: Download and build 116 phone-safe offline Quran assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p assets/audio/quran build/audio-source
+
+          total=$(grep -Ec '^https?://' audio/kani-karaca-source-urls.txt)
+          test "$total" -eq 116
+
+          base_filter="highpass=f=140,equalizer=f=2500:t=q:w=1.0:g=-2.5,equalizer=f=3600:t=q:w=1.0:g=-4.0,equalizer=f=5200:t=q:w=1.2:g=-2.0,acompressor=threshold=-18dB:ratio=2:attack=20:release=180:makeup=1,loudnorm=I=-24:LRA=8:TP=-7"
+          intro_filter="volume='if(lt(t,2),0.68,if(lt(t,8),0.68+(t-2)*0.053333,1))':eval=frame"
+
+          i=0
+          while IFS= read -r url; do
+            [ -n "$url" ] || continue
+            i=$((i+1))
+            name="${url##*/}"
+            echo "[$i/$total] $name"
+
+            wget --quiet --tries=5 --timeout=120               --user-agent="Mozilla/5.0"               --referer="https://semazen.net/"               -O "build/audio-source/$name" "$url"
+
+            test -s "build/audio-source/$name"
+
+            if [[ "$name" == "002_Bakara_Suresi_2_Kani_Karaca.mp3" || "$name" == "017_Isra_Suresi2_Kani_Karaca.mp3" ]]; then
+              filter="$base_filter"
+            else
+              filter="$base_filter,$intro_filter"
+            fi
+
+            ffmpeg -nostdin -y -hide_banner -loglevel error               -i "build/audio-source/$name"               -af "$filter"               -ac 1 -ar 44100 -c:a libmp3lame -b:a 64k               "assets/audio/quran/$name"
+
+            ffmpeg -v error -i "assets/audio/quran/$name" -f null -
+            rm -f "build/audio-source/$name"
+          done < audio/kani-karaca-source-urls.txt
+
+          count=$(find assets/audio/quran -maxdepth 1 -type f -name '*.mp3' | wc -l)
+          echo "OFFLINE_AUDIO_COUNT=$count"
+          test "$count" -eq 116
+
+          du -sh assets/audio/quran
+
+      - name: Switch Quran player to packaged offline assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          from collections import OrderedDict
+          from urllib.parse import urlparse
+
+          urls = [
+              line.strip()
+              for line in Path("audio/kani-karaca-source-urls.txt").read_text(encoding="utf-8").splitlines()
+              if line.strip().startswith(("http://", "https://"))
+          ]
+          if len(urls) != 116:
+              raise SystemExit(f"expected 116 URLs, got {len(urls)}")
+
+          groups = OrderedDict()
+          for url in urls:
+              name = Path(urlparse(url).path).name
+              try:
+                  surah = int(name[:3])
+              except ValueError as e:
+                  raise SystemExit(f"bad Quran audio filename: {name}") from e
+              groups.setdefault(surah, []).append(f"assets/audio/quran/{name}")
+
+          if len(groups) != 114 or min(groups) != 1 or max(groups) != 114:
+              raise SystemExit(f"bad surah grouping: {len(groups)} groups")
+
+          lines = ["const Map<int, List<String>> kaniKaracaSurahAudio = <int, List<String>>{"]
+          for surah, files in groups.items():
+              lines.append(f"  {surah}: <String>[")
+              for file in files:
+                  lines.append(f"    '{file}',")
+              lines.append("  ],")
+          lines.append("};")
+          lines.append("")
+          Path("lib/features/quran/quran_audio_sources.dart").write_text("\n".join(lines), encoding="utf-8")
+
+          p = Path("lib/features/quran/quran_audio_player.dart")
+          s = p.read_text(encoding="utf-8")
+          old = "await _player.setUrl(_urls[_partIndex]);"
+          new = "await _player.setAsset(_urls[_partIndex]);"
+          if old not in s:
+              raise SystemExit("setUrl call not found")
+          s = s.replace(old, new, 1)
+          s = s.replace(
+              "Ses kaydı yüklenemedi. İnternet bağlantını kontrol et.",
+              "Ses kaydı açılamadı.",
+          )
+          p.write_text(s, encoding="utf-8")
+
+          mevlid = Path("lib/features/mevlid/mevlid_audio_player.dart")
+          print("LOCAL_QURAN_MAP=114")
+          print("LOCAL_QURAN_FILES=116")
+          PY
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.47.4"
+          channel: stable
+          cache: true
+
+      - name: Resolve dependencies
+        shell: bash
+        run: |
+          flutter --version
+          flutter pub get
+
+      - name: Run tests
+        shell: bash
+        run: flutter test
+
+      - name: Build emergency offline APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          flutter build apk --release --build-name=0.20.7 --build-number=27
+          test -s build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Verify 116 MP3 are physically inside APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          unzip -l build/app/outputs/flutter-apk/app-release.apk > build/apk-inventory.txt
+          count=$(grep -E 'assets/flutter_assets/assets/audio/quran/.*\.mp3$' build/apk-inventory.txt | wc -l)
+          echo "APK_QURAN_MP3_COUNT=$count"
+          test "$count" -eq 116
+
+          if grep -q 'https://dosyalar.semazen.net/Kani_Karaca_hatim/' lib/features/quran/quran_audio_sources.dart; then
+            echo "Remote Quran URL remained in packaged source map"
+            exit 1
+          fi
+
+          size=$(stat -c%s build/app/outputs/flutter-apk/app-release.apk)
+          echo "APK_SIZE_BYTES=$size"
+          test "$size" -lt 1900000000
+
+          cp build/app/outputs/flutter-apk/app-release.apk build/mumin-duasi-v0207-offline-quran.apk
+          sha256sum build/mumin-duasi-v0207-offline-quran.apk > build/mumin-duasi-v0207-offline-quran.apk.sha256
+
+      - name: Publish v0.20.7 emergency update
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="v0.20.7"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release delete "$tag" --yes --cleanup-tag
+          fi
+          gh release create "$tag"             build/mumin-duasi-v0207-offline-quran.apk             build/mumin-duasi-v0207-offline-quran.apk.sha256             --title "Mümin Duası v0.20.7 - Offline Quran Audio Hotfix"             --notes "Acil düzeltme: Kâni Karaca Hatm-i Şerif sesleri APK içine fiziksel olarak dahil edildi. Build kapısı APK içinde 116/116 MP3 doğrulanmadan release oluşturmaz."
+
+      - name: Final proof
+        shell: bash
+        run: |
+          echo "VERSION=0.20.7+27"
+          echo "APK_QURAN_MP3_COUNT=$(grep -E 'assets/flutter_assets/assets/audio/quran/.*\.mp3$' build/apk-inventory.txt | wc -l)"
+          sha256sum build/mumin-duasi-v0207-offline-quran.apk
+          ls -lh build/mumin-duasi-v0207-offline-quran.apk
