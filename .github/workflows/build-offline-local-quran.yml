@@ -57,7 +57,7 @@ jobs:
 
       - name: Verify MOORE D audio endpoint
         env:
-          BASE_URL: ${{ inputs.base_url }}
+          BASE_URL: https://mooreunivers.com.tr/media/mumin-duasi/kani-karaca
         shell: bash
         run: |
           set -euo pipefail
@@ -97,7 +97,7 @@ jobs:
 
       - name: Test and build
         env:
-          BASE_URL: ${{ inputs.base_url }}
+          BASE_URL: https://mooreunivers.com.tr/media/mumin-duasi/kani-karaca
         shell: bash
         run: |
           set -euo pipefail
@@ -107,7 +107,7 @@ jobs:
 
       - name: APK proof
         env:
-          BASE_URL: ${{ inputs.base_url }}
+          BASE_URL: https://mooreunivers.com.tr/media/mumin-duasi/kani-karaca
         shell: bash
         run: |
           set -euo pipefail
