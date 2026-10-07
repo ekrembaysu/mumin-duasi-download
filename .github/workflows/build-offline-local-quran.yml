@@ -116,7 +116,27 @@ jobs:
           test -s "$APK"
           unzip -l "$APK" > build/apk-inventory.txt
 
-          embedded=$(grep -E 'assets/flutter_assets/assets/audio/quran/.*\.mp3$' build/apk-inventory.txt | wc -l)
+          embedded=$((grep -E 'assets/flutter_assets/assets/audio/quran/.*\.mp3
+          echo "EMBEDDED_QURAN_MP3_COUNT=$embedded"
+          test "$embedded" -eq 0
+
+          cp "$APK" build/mumin-duasi-v0207.apk
+          sha256sum build/mumin-duasi-v0207.apk > build/mumin-duasi-v0207.apk.sha256
+          ls -lh build/mumin-duasi-v0207.apk
+
+      - name: Publish verified update
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="v0.20.7"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release delete "$tag" --yes --cleanup-tag
+          fi
+
+          gh release create "$tag"             build/mumin-duasi-v0207.apk             build/mumin-duasi-v0207.apk.sha256             --title "Mümin Duası v0.20.7 - MOORE Hosted Quran Audio"             --notes "Kâni Karaca Kur'an sesleri yalnızca MOORE'un D sunucusundan yayınlanır. Üçüncü taraf Kur'an ses kaynağı yoktur. Release öncesi 114 kayıtlı D manifesti ve uzak uç noktalar doğrulanmıştır."
+ build/apk-inventory.txt || true) | wc -l)
           echo "EMBEDDED_QURAN_MP3_COUNT=$embedded"
           test "$embedded" -eq 0
 
