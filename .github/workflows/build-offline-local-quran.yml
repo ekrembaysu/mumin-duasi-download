@@ -123,7 +123,25 @@ jobs:
           test -s "$APK"
           unzip -l "$APK" > build/apk-inventory.txt
 
-          embedded=$(grep -E 'assets/flutter_assets/assets/audio/quran/.*\.mp3$' build/apk-inventory.txt | wc -l)
+          embedded=$(grep -Ec 'assets/flutter_assets/assets/audio/quran/.*\.mp3
+
+          cp "$APK" build/mumin-duasi-v0208.apk
+          sha256sum build/mumin-duasi-v0208.apk > build/mumin-duasi-v0208.apk.sha256
+          ls -lh build/mumin-duasi-v0208.apk
+
+      - name: Publish verified update
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="v0.20.8"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release delete "$tag" --yes --cleanup-tag
+          fi
+
+          gh release create "$tag"             build/mumin-duasi-v0208.apk             build/mumin-duasi-v0208.apk.sha256             --title "Mümin Duası v0.20.8 - Namaz Vakitleri MOORE Hotfix"             --notes "Namaz vakitleri MOORE yerel IMANLIFE veritabanı ve Diyanet senkronu üzerinden çalışır. Kâni Karaca Kur'an sesleri MOORE D sunucusundan yayınlanır."
+ build/apk-inventory.txt || true)
           echo "EMBEDDED_QURAN_MP3_COUNT=$embedded"
           test "$embedded" -eq 0
 
