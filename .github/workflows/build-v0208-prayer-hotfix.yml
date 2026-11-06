@@ -1,0 +1,147 @@
+name: Build Mümin Duası v0.20.8 Prayer Hotfix
+
+on:
+  push:
+    branches:
+      - source-v0208
+    paths:
+      - "source-bundles/99-prayer-v0208.json"
+      - ".github/workflows/build-v0208-prayer-hotfix.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      QURAN_BASE_URL: https://mooreunivers.com.tr/media/mumin-duasi/kani-karaca
+      PRAYER_URL: https://mooreunivers.tr/api/mumin-duasi/prayer?city=ALANYA&countryCode=TR
+
+    steps:
+      - name: Checkout hotfix source
+        uses: actions/checkout@v4
+        with:
+          ref: source-v0208
+          fetch-depth: 1
+
+      - name: Reconstruct Flutter source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64, glob, json, os
+          for bundle in sorted(glob.glob("source-bundles/*.json")):
+              with open(bundle, "r", encoding="utf-8-sig") as f:
+                  data = json.load(f)
+              for path, encoded in data.items():
+                  parent = os.path.dirname(path)
+                  if parent:
+                      os.makedirs(parent, exist_ok=True)
+                  with open(path, "wb") as out:
+                      out.write(base64.b64decode(encoded))
+          PY
+
+      - name: Verify prayer source is MOORE API only
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q "https://mooreunivers.tr/api/mumin-duasi/prayer" lib/features/prayer/prayer_repository.dart
+          ! grep -q "supabase_flutter" lib/features/prayer/prayer_repository.dart
+          ! grep -q "Supabase.instance" lib/features/prayer/prayer_repository.dart
+          ! grep -q "prayer-sync" lib/features/prayer/prayer_repository.dart
+
+      - name: Verify live MOORE prayer endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 --connect-timeout 15 "$PRAYER_URL" -o /tmp/prayer.json
+          python3 - <<'PY'
+          import json
+          data=json.load(open("/tmp/prayer.json","r",encoding="utf-8"))
+          assert data.get("ok") is True, data
+          times=data.get("times") or {}
+          for key in ("imsak","gunes","ogle","ikindi","aksam","yatsi"):
+              assert times.get(key), (key,data)
+          print("PRAYER_ENDPOINT_OK", data.get("city"), data.get("date"), times)
+          PY
+
+      - name: Verify MOORE Quran audio endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 --connect-timeout 15 "$QURAN_BASE_URL/quran-audio-manifest.json" -o /tmp/quran.json
+          python3 - <<'PY'
+          import json
+          m=json.load(open("/tmp/quran.json","r",encoding="utf-8"))
+          assert m.get("count")==114, m.get("count")
+          assert len(m.get("files",[]))==114
+          print("QURAN_MANIFEST_OK=114")
+          PY
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.47.4"
+          channel: stable
+          cache: true
+
+      - name: Analyze prayer hotfix
+        shell: bash
+        run: |
+          set -euo pipefail
+          flutter pub get
+          dart format --output=none --set-exit-if-changed lib/features/prayer/prayer_repository.dart
+          flutter analyze lib/features/prayer/prayer_repository.dart lib/features/prayer/prayer_times_screen.dart
+
+      - name: Build release APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          flutter build apk --release \
+            --build-name=0.20.8 \
+            --build-number=2028 \
+            --dart-define=QURAN_AUDIO_BASE_URL="$QURAN_BASE_URL"
+
+      - name: APK proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=build/app/outputs/flutter-apk/app-release.apk
+          test -s "$APK"
+          cp "$APK" build/mumin-duasi-v0208-prayer-hotfix.apk
+          sha256sum build/mumin-duasi-v0208-prayer-hotfix.apk > build/mumin-duasi-v0208-prayer-hotfix.apk.sha256
+          ls -lh build/mumin-duasi-v0208-prayer-hotfix.apk
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mumin-duasi-v0208-prayer-hotfix
+          path: |
+            build/mumin-duasi-v0208-prayer-hotfix.apk
+            build/mumin-duasi-v0208-prayer-hotfix.apk.sha256
+
+      - name: Publish hotfix release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="v0.20.8-prayer-hotfix"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag already exists; refusing to overwrite."
+            exit 1
+          fi
+          gh release create "$tag" \
+            build/mumin-duasi-v0208-prayer-hotfix.apk \
+            build/mumin-duasi-v0208-prayer-hotfix.apk.sha256 \
+            --title "Mümin Duası v0.20.8 Prayer Hotfix" \
+            --notes "Minimal hotfix from verified v0.20.7 source. Prayer times now use the MOORE-hosted IMANLIFE prayer API backed by the local PostgreSQL cache. Existing v0.20.7 release is unchanged."
