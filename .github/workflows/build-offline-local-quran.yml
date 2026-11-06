@@ -27,7 +27,7 @@ jobs:
       - name: Checkout protected source
         uses: actions/checkout@v4
         with:
-          ref: source-v0206
+          ref: hotfix/prayer-moore-20261106
           fetch-depth: 1
 
       - name: Reconstruct Flutter source
@@ -55,6 +55,13 @@ jobs:
           grep -q "QURAN_AUDIO_BASE_URL" lib/core/config/app_config.dart
           grep -q "setUrl(_urls\[_partIndex\])" lib/features/quran/quran_audio_player.dart
           ! grep -q "assets/audio/quran/" pubspec.yaml
+
+      - name: Prove prayer hotfix uses MOORE API
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q "https://mooreunivers.tr/api/mumin-duasi/prayer" lib/features/prayer/prayer_repository.dart
+          ! grep -q "supabase_flutter" lib/features/prayer/prayer_repository.dart
 
       - name: Verify MOORE D audio endpoint
         env:
